@@ -1,3 +1,5 @@
 <resources>
     <string name="app_name">NoteiT</string>
+    <string name="preferences_file_name">com.spacetech.noteit.preferences</string>
+    <string name="isGrid">isGrid</string>
 </resources>

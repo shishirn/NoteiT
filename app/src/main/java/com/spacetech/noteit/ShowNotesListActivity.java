@@ -7,12 +7,14 @@ import androidx.appcompat.app.AppCompatActivity;
 import androidx.appcompat.widget.Toolbar;
 import androidx.cardview.widget.CardView;
 import androidx.recyclerview.widget.GridLayoutManager;
+import androidx.recyclerview.widget.ItemTouchHelper;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 import androidx.room.Room;
 
 import android.content.Context;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.os.AsyncTask;
 import android.os.Build;
 import android.os.Bundle;
@@ -33,18 +35,14 @@ import java.util.List;
 
 public class ShowNotesListActivity extends AppCompatActivity {
 
-   // public static final int REQUEST_CODE_INSERT = 123;
-  //  public static final String INTENT_ACTION = "INTENT_ACTION";
-    //public static final String INSERT = "INSERT";
-    //public static final String UPDATE = "UPDATE";
-
     RecyclerView mNotesRecyclerView;
     NoteitDatabase mDb;
-    private NotesAdapter notesAdapter;
+    private NotesAdapter mNotesAdapter;
     FloatingActionButton mNewNoteFab;
     Toolbar mToolBar;
-
-
+    SharedPreferences mSharedPref;
+    Menu mMenu;
+    boolean mIsGrid;
 
     @RequiresApi(api = Build.VERSION_CODES.LOLLIPOP)
     @Override
@@ -52,10 +50,15 @@ public class ShowNotesListActivity extends AppCompatActivity {
 
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_show_notes_list);
+
+        //Get shared preference for this app
+        mSharedPref = getSharedPreferences(getString(R.string.preferences_file_name), Context.MODE_PRIVATE);
+        //Getting shared preference value for list/grid layout
+        mIsGrid = mSharedPref.getBoolean(getString(R.string.isGrid), false);
+
         mNotesRecyclerView = findViewById(R.id.notesRecyclerView);
         mNewNoteFab = findViewById(R.id.newNoteFab);
         mToolBar = findViewById(R.id.toolbar3);
-
 
         setSupportActionBar(mToolBar);
         mNewNoteFab.setOnClickListener(new View.OnClickListener() {
@@ -66,54 +69,99 @@ public class ShowNotesListActivity extends AppCompatActivity {
                 startActivityForResult(intent, AppConstants.REQUEST_CODE_INSERT);
             }
         });
+
+        // get the DB reference into mDb variable
         mDb = Room.databaseBuilder(getApplicationContext(),
                 NoteitDatabase.class, "noteitdb").build();
         ShowNotesListAsyncTask showNotesListAsyncTask = new ShowNotesListAsyncTask();
         showNotesListAsyncTask.execute();
 
-        //Adding Layout manager and setting it for the recycler view
-        RecyclerView.LayoutManager layoutManager = new LinearLayoutManager(this);
-        mNotesRecyclerView.setLayoutManager(layoutManager);
-        notesAdapter = new NotesAdapter(new ArrayList<Note>());
-        mNotesRecyclerView.setAdapter(notesAdapter);
-    }
 
+        //Adding Layout manager based on preference and setting it for the recycler view
+        RecyclerView.LayoutManager layoutManager;
+        if (mIsGrid) {
+            layoutManager = new GridLayoutManager(this, 2);
+        } else {
+            layoutManager = new LinearLayoutManager(this);
+        }
+
+        mNotesAdapter = new NotesAdapter(new ArrayList<Note>());
+        mNotesRecyclerView.setAdapter(mNotesAdapter);
+        mNotesRecyclerView.setLayoutManager(layoutManager);
+
+        //Adding Swipe and delete feature
+        ItemTouchHelper itemTouchHelper = new
+                ItemTouchHelper(new SwipeToDeleteCallback(mNotesAdapter, this));
+        itemTouchHelper.attachToRecyclerView(mNotesRecyclerView);
+    }
 
     // Logic for menu items
     @Override
     public boolean onCreateOptionsMenu(Menu menu) {
         MenuInflater menuInflater = getMenuInflater();
         menuInflater.inflate(R.menu.notes_list_actions, menu);
+        mMenu = menu;
+        if (mIsGrid) {
+            menu.getItem(0).setIcon(R.drawable.ic_list_black_24dp);
+        } else {
+            menu.getItem(0).setIcon(R.drawable.ic_grid_on_black_24dp);
+        }
         return true;
     }
+
     @Override
     public boolean onOptionsItemSelected(MenuItem item) {
         int id = item.getItemId();
-        if (id == R.id.gridview) {
+
+        // get current preference for notes view - List or Grid
+
+        if (!mIsGrid) {
             showGridView(this);
+        } else {
+            showListView(this);
         }
         return super.onOptionsItemSelected(item);
     }
+
     private void showGridView(Context context) {
         GridLayoutManager gridLayoutManager = new GridLayoutManager(context, 2);
         mNotesRecyclerView.setLayoutManager(gridLayoutManager);
+
+        //Updating shared preference key "isGrid" to 1.
+        SharedPreferences.Editor editor = mSharedPref.edit();
+        editor.putBoolean(getString(R.string.isGrid), true);
+        mIsGrid = true;
+        editor.apply();
+
+        //updating the menu icon to show list view icon
+        mMenu.getItem(0).setIcon(R.drawable.ic_list_black_24dp);
     }
 
+    private void showListView(Context context) {
+        LinearLayoutManager linearLayoutManager = new LinearLayoutManager(context);
+        mNotesRecyclerView.setLayoutManager(linearLayoutManager);
+        SharedPreferences.Editor editor = mSharedPref.edit();
+        editor.putBoolean(getString(R.string.isGrid), false);
+        mIsGrid = false;
+        editor.apply();
 
+        //updating the menu icon to show grid view icon
+        mMenu.getItem(0).setIcon(R.drawable.ic_grid_on_black_24dp);
+    }
 
     @Override
     protected void onActivityResult(int requestCode, int resultCode, @Nullable Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
         if (requestCode == AppConstants.REQUEST_CODE_INSERT && resultCode == RESULT_OK) {
-            List<Note> notes = notesAdapter.getNotes();
+            List<Note> notes = mNotesAdapter.getNotes();
             notes.add((Note) data.getSerializableExtra("note"));
-            notesAdapter.setNotes(notes);
-            notesAdapter.notifyItemInserted(notesAdapter.getItemCount() + 1);
+            mNotesAdapter.setNotes(notes);
+            mNotesAdapter.notifyItemInserted(mNotesAdapter.getItemCount() + 1);
         }
-        if (requestCode == AppConstants.REQUEST_CODE_UPDATE && resultCode == RESULT_OK){
-            int position = (int)data.getSerializableExtra(AppConstants.POSITION);
-            Note note = (Note)data.getSerializableExtra("note");
-            notesAdapter.notifyItemChanged(position,note);
+        if (requestCode == AppConstants.REQUEST_CODE_UPDATE && resultCode == RESULT_OK) {
+            int position = (int) data.getSerializableExtra(AppConstants.POSITION);
+            Note note = (Note) data.getSerializableExtra("note");
+            mNotesAdapter.notifyItemChanged(position, note);
         }
     }
 
@@ -129,8 +177,18 @@ public class ShowNotesListActivity extends AppCompatActivity {
         @Override
         protected void onPostExecute(List<Note> notes) {
             super.onPostExecute(notes);
-            notesAdapter.setNotes(notes);
-            notesAdapter.notifyDataSetChanged();
+            mNotesAdapter.setNotes(notes);
+            mNotesAdapter.notifyDataSetChanged();
+        }
+    }
+
+    //Deleting Note from DB on Swipe
+    class DeleteNoteListAsyncTask extends AsyncTask<Note, Void, Void> {
+
+        @Override
+        protected Void doInBackground(Note... note) {
+            mDb.noteDao().deleteNote(note[0]);
+            return null;
         }
     }
 
@@ -149,34 +207,41 @@ public class ShowNotesListActivity extends AppCompatActivity {
             this.notes = notes;
         }
 
+        public void deleteNote(int position) {
+            Note mRecentlyDeletedItem = notes.get(position);
+            DeleteNoteListAsyncTask deleteNoteListAsyncTask = new DeleteNoteListAsyncTask();
+            deleteNoteListAsyncTask.execute(mRecentlyDeletedItem);
+            notes.remove(position);
+            notifyItemRemoved(position);
+        }
+
         @NonNull
         @Override
         public NotesViewHolder onCreateViewHolder(@NonNull ViewGroup parent, int viewType) {
-            // create a new view
+            // create a view object
             View v = LayoutInflater.from(parent.getContext()).inflate(R.layout.notes_item, parent, false);
+
             TextView notesTextView = v.findViewById(R.id.notesTextView);
             TextView titleTextView = v.findViewById(R.id.titleTextView);
             CardView cardView = v.findViewById(R.id.notesCardView);
-            NotesViewHolder notesViewHolder = new NotesViewHolder(v, notesTextView, titleTextView,cardView);
+            NotesViewHolder notesViewHolder = new NotesViewHolder(v, notesTextView, titleTextView, cardView);
             return notesViewHolder;
         }
 
         @Override
         public void onBindViewHolder(@NonNull NotesViewHolder holder, final int position) {
             bindViewHolderHelper(holder, notes.get(position));
-
         }
 
         @Override
         public void onBindViewHolder(@NonNull NotesViewHolder holder, int position, @NonNull List<Object> payloads) {
-            if (payloads == null || payloads.isEmpty()){
+            if (payloads == null || payloads.isEmpty()) {
                 super.onBindViewHolder(holder, position, payloads);
+            } else {
+                bindViewHolderHelper(holder, (Note) payloads.get(0));
             }
-            else {
-                bindViewHolderHelper(holder,(Note)payloads.get(0));
-            }
-
         }
+
         private void bindViewHolderHelper(@NonNull final NotesViewHolder holder, final Note note) {
 
             holder.mTitleTextView.setText(note.getTitle());
@@ -187,15 +252,13 @@ public class ShowNotesListActivity extends AppCompatActivity {
                     Intent intent = new Intent(ShowNotesListActivity.this, AddNoteActivity.class);
                     //intent.putExtra("title", ((TextView)v.findViewById(R.id.titleTextView)).getText().toString());
                     intent.putExtra(AppConstants.NOTE, note);
-                    intent.putExtra(AppConstants.INTENT_ACTION,AppConstants.UPDATE);
+                    intent.putExtra(AppConstants.INTENT_ACTION, AppConstants.UPDATE);
                     intent.putExtra(AppConstants.POSITION, holder.getAdapterPosition());
                     //startActivity(intent);
-                    startActivityForResult(intent,AppConstants.REQUEST_CODE_UPDATE);
+                    startActivityForResult(intent, AppConstants.REQUEST_CODE_UPDATE);
                 }
             });
         }
-
-
 
         @Override
         public int getItemCount() {
@@ -208,7 +271,7 @@ public class ShowNotesListActivity extends AppCompatActivity {
             public TextView mTitleTextView;
             public CardView mCardView;
 
-            public NotesViewHolder(View mItemView, @NonNull TextView mNotesTextView, TextView mTitleTextView,CardView mCardView ) {
+            public NotesViewHolder(View mItemView, @NonNull TextView mNotesTextView, TextView mTitleTextView, CardView mCardView) {
                 super(mItemView);
                 this.mItemView = mItemView;
                 this.mNotesTextView = mNotesTextView;
@@ -218,7 +281,4 @@ public class ShowNotesListActivity extends AppCompatActivity {
         }
 
     }
-
-
-
 }
